@@ -1,0 +1,116 @@
+name: Auto Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  release:
+    if: contains(github.event.head_commit.message, 'release ebook-translator@')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Version
+        id: extract_version
+        run: |
+          echo "Analyzing commit message..."
+          echo "Commit Message: ${{ github.event.head_commit.message }}"
+          
+          VERSION=$(echo "${{ github.event.head_commit.message }}" | grep -oP 'release ebook-translator@\K[0-9.]+')
+          echo "Found version candidate: $VERSION"
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from commit message."
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+
+      - name: Build Plugin
+        run: |
+          echo "Starting build process..."
+          echo "Current working directory: $(pwd)"
+          
+          # Determine python command
+          if command -v python > /dev/null 2>&1; then
+            echo "Python found."
+            PY_CMD="python"
+          elif command -v python3 > /dev/null 2>&1; then
+            echo "Python3 found."
+            PY_CMD="python3"
+          elif command -v calibre-debug > /dev/null 2>&1; then
+            echo "calibre-debug found."
+            PY_CMD="calibre-debug -e"
+          else
+            echo "Error: Neither Python nor Calibre (calibre-debug) found."
+            exit 1
+          fi
+          VERSION=${{ steps.extract_version.outputs.version }}
+          echo "Using builder: $PY_CMD"
+          echo "Forcing build version: $VERSION"
+          
+          if $PY_CMD build_plugin.py --version $VERSION; then
+             echo "Build command executed successfully."
+          else
+             echo "Build command failed."
+             exit 1
+          fi
+          echo "Build script completed."
+
+      - name: Commit and Push Artifacts
+        run: |
+          echo "Configuring git..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "Checking build directory content:"
+          ls -R build || echo "Build directory missing!"
+          
+          # Force add the build directory/zip to git to ensure it's tracked even if ignored
+          echo "Adding artifacts to git..."
+          git add -f build/*.zip
+          
+          # Also add the updated __init__.py so the repo stays in sync
+          echo "Adding updated __init__.py..."
+          git add __init__.py
+          
+          # Commit check: fail safely if nothing to commit (unlikely for a new build)
+          echo "Checking for changes..."
+          if git diff --staged --quiet; then
+            echo "No changes to commit. Is the ZIP file missing?"
+            exit 1
+          else
+            echo "Committing changes..."
+            VERSION=${{ steps.extract_version.outputs.version }}
+            git commit -m "chore: release artifacts v$VERSION [skip ci]"
+            echo "Pushing changes..."
+            git push
+            echo "Push complete."
+          fi
+
+      - name: Create and Push Tag
+        run: |
+          VERSION=${{ steps.extract_version.outputs.version }}
+          TAG_NAME="v$VERSION"
+          echo "Creating tag: $TAG_NAME"
+          
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          echo "Tag pushed."
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.extract_version.outputs.version }}
+          files: build/*.zip
+          name: Release v${{ steps.extract_version.outputs.version }}
+          draft: false
+          prerelease: false
