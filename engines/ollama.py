@@ -37,8 +37,12 @@ class OllamaTranslate(GenAI):
     
     samplings = ['temperature', 'top_p']
     sampling = 'temperature'
+    use_temperature = False
     temperature = 0.1
+    use_top_p = False
     top_p = 0.9
+    use_top_k = False
+    top_k = 40
     stream = False  # Default to false as per user request example, generally easier to start with
     
     models: list[str] = []
@@ -73,8 +77,12 @@ class OllamaTranslate(GenAI):
         
         self.prompt = self.config.get('prompt', self.prompt)
         self.sampling = self.config.get('sampling', self.sampling)
+        self.use_temperature = self.config.get('use_temperature', self.use_temperature)
         self.temperature = self.config.get('temperature', self.temperature)
+        self.use_top_p = self.config.get('use_top_p', self.use_top_p)
         self.top_p = self.config.get('top_p', self.top_p)
+        self.use_top_k = self.config.get('use_top_k', self.use_top_k)
+        self.top_k = self.config.get('top_k', self.top_k)
         self.stream = self.config.get('stream', self.stream)
         self.model = self.config.get('model', self.model)
 
@@ -138,9 +146,14 @@ class OllamaTranslate(GenAI):
             }
         }
         
+        
         # Apply sampling
-        sampling_value = getattr(self, self.sampling)
-        body['options'][self.sampling] = sampling_value
+        if self.use_temperature:
+            body['options']['temperature'] = self.temperature
+        if self.use_top_p:
+            body['options']['top_p'] = self.top_p
+        if self.use_top_k:
+            body['options']['top_k'] = self.top_k
         
         return json.dumps(body)
 

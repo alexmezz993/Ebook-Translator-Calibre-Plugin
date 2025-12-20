@@ -532,18 +532,19 @@ class TranslationSetting(QDialog):
         sampling_widget = QWidget()
         sampling_layout = QHBoxLayout(sampling_widget)
         sampling_layout.setContentsMargins(0, 0, 0, 0)
-        temperature = QRadioButton()
+        temperature = QCheckBox()
         temperature_label = QLabel('temperature')
         temperature_value = QDoubleSpinBox()
         temperature_value.setDecimals(1)
         temperature_value.setSingleStep(0.1)
-        top_p = QRadioButton()
+        top_p = QCheckBox()
         top_p_label = QLabel('top_p')
         top_p_value = QDoubleSpinBox()
         top_p_value.setDecimals(1)
         top_p_value.setSingleStep(0.1)
         top_p_value.setRange(0, 1)
-        top_k = QLabel('top_k')
+        top_k_check = QCheckBox()
+        top_k_label = QLabel('top_k')
         top_k_value = QSpinBox()
         top_k_value.setSingleStep(1)
         top_k_value.setRange(1, 40)
@@ -555,7 +556,8 @@ class TranslationSetting(QDialog):
         sampling_layout.addWidget(top_p_label)
         sampling_layout.addWidget(top_p_value)
         sampling_layout.addSpacing(20)
-        sampling_layout.addWidget(top_k)
+        sampling_layout.addWidget(top_k_check)
+        sampling_layout.addWidget(top_k_label)
         sampling_layout.addWidget(top_k_value)
         sampling_layout.addStretch(1)
         genai_layout.addRow(_('Sampling'), sampling_widget)
@@ -569,14 +571,33 @@ class TranslationSetting(QDialog):
         sampling_btn_group = QButtonGroup(sampling_widget)
         sampling_btn_group.addButton(temperature, 0)
         sampling_btn_group.addButton(top_p, 1)
+        sampling_btn_group.addButton(top_k_check, 2)
 
         labels = {
             temperature: temperature_label.text(),
-            top_p: top_p_label.text()}
+            top_p: top_p_label.text(),
+            top_k_check: top_k_label.text()}
 
-        sampling_btn_group.buttonClicked.connect(
-            lambda button: self.current_engine.config
-            .update(sampling=labels[button]))
+        def on_sampling_button_clicked(button):
+            # For Ollama, we update boolean flags
+            if issubclass(self.current_engine, OllamaTranslate):
+                config = self.current_engine.config
+                if button == temperature:
+                    config.update(use_temperature=button.isChecked())
+                elif button == top_p:
+                    config.update(use_top_p=button.isChecked())
+                elif button == top_k_check:
+                    config.update(use_top_k=button.isChecked())
+            else:
+                # For others, mutually exclusive string
+                # Only if the button is checked (Radio behavior emulation)
+                if button.isChecked():
+                    self.current_engine.config.update(sampling=labels[button])
+        
+        # We connect to buttonToggled or similar? 
+        # buttonClicked passes the button. 
+        # Checkboxes toggle. 
+        sampling_btn_group.buttonClicked.connect(on_sampling_button_clicked)
 
         layout.addWidget(genai_group)
 
@@ -664,7 +685,7 @@ class TranslationSetting(QDialog):
             is_ollama = issubclass(self.current_engine, OllamaTranslate)
 
             top_p_label.setText('topP' if is_gemini else 'top_p')
-            top_k.setText('topK' if is_gemini else 'top_k')
+            top_k_label.setText('topK' if is_gemini else 'top_k')
             temperature.setVisible(not is_gemini)
             top_p.setVisible(not is_gemini)
             # Temperature range
@@ -723,13 +744,20 @@ class TranslationSetting(QDialog):
                 auto_fetch_ai_models()
             # Sampling
             if not issubclass(self.current_engine, GeminiTranslate):
-                # Check if sampling key exists in config, otherwise use default
-                # from engine. Some engines might not have 'sampling' (Ollama does).
-                sampling = config.get('sampling', getattr(
-                    self.current_engine, 'sampling', 'temperature'))
-                if sampling in self.current_engine.samplings:
-                    btn_id = self.current_engine.samplings.index(sampling)
-                    sampling_btn_group.button(btn_id).setChecked(True)
+                if is_ollama:
+                    sampling_btn_group.setExclusive(False)
+                    temperature.setChecked(config.get('use_temperature', self.current_engine.use_temperature))
+                    top_p.setChecked(config.get('use_top_p', self.current_engine.use_top_p))
+                    top_k_check.setChecked(config.get('use_top_k', self.current_engine.use_top_k))
+                else:
+                    sampling_btn_group.setExclusive(True)
+                    # Check if sampling key exists in config, otherwise use default
+                    # from engine. Some engines might not have 'sampling' (Ollama does).
+                    sampling = config.get('sampling', getattr(
+                        self.current_engine, 'sampling', 'temperature'))
+                    if sampling in self.current_engine.samplings:
+                        btn_id = self.current_engine.samplings.index(sampling)
+                        sampling_btn_group.button(btn_id).setChecked(True)
             temperature_value.setValue(
                 config.get('temperature', self.current_engine.temperature))
             temperature_value.valueChanged.connect(
@@ -738,11 +766,17 @@ class TranslationSetting(QDialog):
                 config.get('top_p', self.current_engine.top_p))
             top_p_value.valueChanged.connect(
                 lambda value: config.update(top_p=round(value, 1)))
-            top_k.setVisible(False)
+            top_k_check.setVisible(False)
+            top_k_label.setVisible(False)
             top_k_value.setVisible(False)
             if not issubclass(self.current_engine, ChatgptTranslate):
-                top_k.setVisible(True)
+                top_k_label.setVisible(True)
                 top_k_value.setVisible(True)
+                if issubclass(self.current_engine, OllamaTranslate):
+                     top_k_check.setVisible(True)
+                else:
+                     top_k_check.setVisible(False)
+                
                 top_k_value.setValue(
                     config.get('top_k', getattr(
                         self.current_engine, 'top_k', 1)))
